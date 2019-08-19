@@ -1,140 +1,138 @@
-from flask import Flask, request, jsonify, json
-import urllib
-from pymongo import MongoClient
-from typing import Dict
+from flask import Flask, request, jsonify
+from scholarly_wallet import orcid_api as orcid
+from scholarly_wallet import config
+from scholarly_wallet import mongo_access as mongo, github_api as github
+from scholarly_wallet import figshare_api as figshare
+from flask_jwt_extended import (
+    JWTManager, jwt_required, create_access_token,
+    get_jwt_identity
+)
 
 app = Flask(__name__)
 
+app.config['JWT_SECRET_KEY'] = config.get('DEFAULT', 'JWT_SECRET')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = int(config.get('DEFAULT', 'JWT_EXPIRES'))
+jwt = JWTManager(app)
 
-@app.route("/auth/orcid", methods=['GET', 'OPTIONS'])
+
+DEFAULT_SORT = {
+    'orcid': 'title',
+    'github': 'full_name',
+    'figshare': 'title'
+}
+
+
+@app.route("/api/auth/orcid", methods=['GET', 'OPTIONS'])
 def signin():
     auth_code = request.args.get('orcid_auth_code')
-    params = {'client_id': '',
-              'client_secret': '',
-              'grant_type': 'authorization_code',
-              'code': auth_code,
-              'redirect_uri': 'http://localhost:4200/main/login'
-              }
-    data = urllib.parse.urlencode(params)
-    data = data.encode('ascii')
-    req = urllib.request.Request('https://orcid.org/oauth/token', data,
-                                 headers={'Accept': 'application/json'})
-    response = urllib.request.urlopen(req).read()
-    user_data: Dict = json.loads(response)
-    user_data.pop('access_token')
-    user_data.pop('token_type')
-    user_data.pop('refresh_token')
-    user_data.pop('expires_in')
-    user_data.pop('scope')
-    if not user_exists(user_data['orcid']):
-        create_user(user_data)
-        user_data.pop('_id')
-    return jsonify(user_data)
+    user_data = orcid.authenticate(auth_code)
+    if user_data is None:
+        return jsonify({"msg": "Failed authetication with Orcid"}), 403
+    access_token = create_access_token(identity=user_data)
+    return jsonify(access_token=access_token), 200
 
 
-def user_exists(orcid):
-    client = MongoClient()
-    db = client.sw
-    collection = db.users
-    user = collection.find_one({'orcid': orcid})
-    return user is not None
+@app.route("/api/profile", methods=['GET', 'OPTIONS'])
+@jwt_required
+def profile():
+    current_user = get_jwt_identity()
+    return jsonify(current_user), 200
 
 
-def create_user(user):
-    print(user)
-    client = MongoClient()
-    db = client.sw
-    collection = db.users
-    collection.insert_one(user)
-    print(user)
-
-
-@app.route('/auth/github', methods=['GET', 'OPTIONS'])
+@app.route('/api/auth/github', methods=['GET', 'OPTIONS'])
+@jwt_required
 def github_auth():
     auth_code = request.args.get('code')
-    orcid = request.args.get('orcid')
-    params = {'client_id': '',
-              'client_secret': '',
-              'code': auth_code
-              }
-    data = urllib.parse.urlencode(params)
-    data = data.encode('ascii')
-    req = urllib.request.Request('https://github.com/login/oauth/access_token', data,
-                                 headers={'Accept': 'application/json'})
-    response = urllib.request.urlopen(req).read()
-    user_data = json.loads(response)
-    repositories = get_repositories(user_data['access_token'], orcid)
+    orcid_id = request.args.get('orcid')
+    github_token = github.authenticate(auth_code, orcid_id)
+    repositories = github.get_repositories(github_token, orcid_id)
     return jsonify(repositories)
 
 
-def get_repositories(access_token, orcid):
-    req = urllib.request.Request('https://api.github.com/user?access_token=' + access_token,
-                                 headers={'Accept': 'application/json'})
-    response = urllib.request.urlopen(req)
-    user_data = json.loads(response.read())
-
-    req = urllib.request.Request(user_data['repos_url'],
-                                 headers={'Accept': 'application/json'})
-    response = urllib.request.urlopen(req)
-    repos_data = json.loads(response.read())
-    for repo in repos_data:
-        repo['claimed'] = repo_exists(repo['html_url'])
-    return [repo for repo in repos_data if not repo['claimed']]
+@app.route('/api/auth/figshare', methods=['GET', 'OPTIONS'])
+@jwt_required
+def figshare_auth():
+    auth_code = request.args.get('code')
+    orcid_id = request.args.get('orcid')
+    figshare_token = figshare.authenticate(auth_code, orcid_id)
+    articles = figshare.get_articles(figshare_token, orcid_id)
+    return jsonify(articles)
 
 
-@app.route('/ro/claim', methods=['POST', 'OPTIONS'])
-def claim_ro():
+@app.route('/api/<string:source>/claim', methods=['POST', 'OPTIONS'])
+@jwt_required
+def claim_ro(source):
     repositories = request.get_json()
-    orcid = request.args.get('orcid')
+    orcid_id = request.args.get('orcid')
     for repository in repositories:
         repository['claimed'] = True
-        repository['orcid'] = orcid
-    save_ros(repositories)
+        repository['owner'] = orcid_id
+    mongo.save_ros(repositories, source)
     for repository in repositories:
         repository.pop('_id')
     return jsonify(repositories)
 
 
-@app.route('/ro/list', methods=['GET', 'OPTIONS'])
-def list_ros():
-    orcid = request.args.get('orcid')
-    ros = get_claimed(orcid)
-    return jsonify(ros)
+@app.route('/api/<string:orcid_id>/<string:source>/list', methods=['GET', 'OPTIONS'])
+@jwt_required
+def list_github(orcid_id, source):
+    start = int(request.args.get('start'))
+    size = int(request.args.get('size'))
+    start = start * size
+    return jsonify({'count': mongo.count_claimed(orcid_id, source),
+                    'results': mongo.get_claimed(orcid_id, source, DEFAULT_SORT[source], start, size)})
 
 
-def repo_exists(html_url):
-    client = MongoClient()
-    db = client.sw
-    collection = db.ros
-    ro = collection.find_one({'html_url': html_url})
-    return ro is not None
+@app.route('/api/<string:orcid_id>/<string:source>/all', methods=['GET', 'OPTIONS'])
+@jwt_required
+def list_all_ros_by_source(orcid_id, source):
+    return jsonify({'count': mongo.count_claimed(orcid_id, source),
+                    'results': mongo.get_claimed(orcid_id, source, DEFAULT_SORT[source])})
 
 
-def get_claimed(orcid):
-    client = MongoClient()
-    db = client.sw
-    collection = db.ros
-    ros = collection.find({'orcid': orcid})
-    claimed = []
-    for ro in ros:
-        ro.pop('_id', None)
-        claimed.append(ro)
-    return claimed
+@app.route('/api/<string:orcid_id>/all', methods=['GET', 'OPTIONS'])
+@jwt_required
+def list_all_ros(orcid_id,):
+    all_ros = {
+        'github': [],
+        'orcid': [],
+        'figshare': []
+    }
+    for source in all_ros.keys():
+        all_ros[source] = mongo.get_claimed(orcid_id, source, DEFAULT_SORT[source])
+    return jsonify(all_ros)
 
 
-def save_ros(ros):
-    client = MongoClient()
-    db = client.sw
-    collection = db.ros
-    collection.insert_many(ros)
+@app.route('/api/<string:orcid_id>/discos/create', methods=['POST', 'OPTIONS'])
+@jwt_required
+def create_disco(orcid_id):
+    disco = request.get_json()
+    return jsonify(str(mongo.save_disco(orcid_id, disco)))
 
-# def repo_exists(repo_url, orcid):
-#     sparql = SPARQLWrapper(conf.SPARQL_QUERY_ENDPOINT)
-#     orcid = 'http://orcid.org/' + orcid
-#     query = sparqlt.RO_EXIST.format(orcid=orcid, share_url=repo_url)
-#     sparql.setQuery(query)
-#     sparql.setReturnFormat(JSON)
-#     return bool(sparql.query().convert()['boolean'])
+
+@app.route('/api/<string:orcid_id>/discos/<string:disco_id>/update', methods=['POST', 'OPTIONS'])
+@jwt_required
+def update_disco(orcid_id, disco_id):
+    disco = request.get_json()
+    return jsonify(str(mongo.update_disco(orcid_id, disco_id, disco)))
+
+
+@app.route('/api/<string:orcid_id>/discos/<string:disco_id>', methods=['GET', 'OPTIONS'])
+@jwt_required
+def get_disco(orcid_id, disco_id):
+    disco = mongo.get_disco(orcid_id, disco_id)
+    disco['id'] = str(disco.pop('_id'))
+    return jsonify(disco)
+
+
+@app.route('/api/<string:orcid_id>/discos', methods=['GET', 'OPTIONS'])
+@jwt_required
+def get_all_discos(orcid_id):
+    start = int(request.args.get('start'))
+    size = int(request.args.get('size'))
+    start = start * size
+    return jsonify({'count': mongo.count_discos(orcid_id),
+                    'results':mongo.get_discos(orcid_id, start, size)})
 
 
 if __name__ == '__main__':
