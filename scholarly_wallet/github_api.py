@@ -37,3 +37,10 @@ def get_repositories(access_token, orcid):
     for repo in repos_data:
         repo['claimed'] = mongo.repo_exists(repo['html_url'], orcid)
     return [repo for repo in repos_data if not repo['claimed']]
+
+
+def download_zip_file(download_url, access_token):
+    req = urllib.request.Request(f'{download_url}?access_token={access_token}',
+                                 headers={'Accept': 'application/json'})
+    response = urllib.request.urlopen(req)
+    return response.read()
