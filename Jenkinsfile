@@ -13,8 +13,11 @@ pipeline {
       }
     }
     stage('deploy') {
+      environment {
+        SW_WS_PATH = credentials('sw-ws-path')
+      }
       steps {
-        echo 'COPY FILES TO SETUP PATH'
+        sh 'cp -p -r ./* $SW_WS_PATH'
       }
     }
     stage('start') {
