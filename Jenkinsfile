@@ -10,6 +10,7 @@ pipeline {
     stage('stop') {
       steps {
         echo 'STOP APP SERVICE'
+        sh 'sudo systemctl stop scholarly-wallet-ws'
       }
     }
     stage('deploy') {
@@ -23,6 +24,7 @@ pipeline {
     stage('start') {
       steps {
         echo 'START APP SERVICE'
+        sh 'sudo systemctl start scholarly-wallet-ws'
       }
     }
   }
