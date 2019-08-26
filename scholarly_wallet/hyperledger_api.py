@@ -127,7 +127,7 @@ def research_object_exist(source, research_object):
 
 def claim_ros(orcid_id, source, repositories):
     for repository in repositories:
-        repository.pop("_id")
+        id = repository.pop("_id") if '_id' in repository else None
         if not research_object_exist(source, repository):
             create_reaserch_object(orcid_id, source, repository)
         claim_research_object(orcid_id, source, repository)

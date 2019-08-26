@@ -121,7 +121,7 @@ def create_disco(orcid_id):
         node["data"]["id"] for node in disco["diagram"]["elements"]["nodes"]
     ]
     thread = Thread(
-        target=hyperledger.create_disco,
+        target=hyperledger.create_disco_transaction,
         args=(orcid_id, disco_id, disco_name, research_objects_urls),
     )
     thread.start()
