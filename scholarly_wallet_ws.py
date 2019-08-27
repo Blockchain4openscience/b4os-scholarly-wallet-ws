@@ -58,7 +58,7 @@ def figshare_auth():
     if figshare_token is not None:
         articles = figshare.get_articles(figshare_token, orcid_id)
         return jsonify(articles)
-    else
+    else:
         return jsonify({'Msg': 'Not auth for figshare'}), 403
 
 
