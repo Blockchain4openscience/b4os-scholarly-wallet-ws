@@ -59,7 +59,7 @@ def figshare_auth():
         articles = figshare.get_articles(figshare_token, orcid_id)
         return jsonify(articles)
     else:
-        return jsonify({'Msg': 'Not auth for figshare'}), 403
+        return jsonify({"Msg": "Not auth for figshare"}), 403
 
 
 @app.route("/api/<string:source>/claim", methods=["POST", "OPTIONS"])
@@ -72,7 +72,7 @@ def claim_ro(source):
         repository["owner"] = orcid_id
     mongo.save_ros(repositories, source)
     for repository in repositories:
-        repository.pop('_id')
+        repository.pop("_id")
     thread = Thread(target=hyperledger.claim_ros, args=(orcid_id, source, repositories))
     thread.start()
     return jsonify(repositories)
@@ -119,7 +119,7 @@ def list_all_ros(orcid_id,):
 def create_disco(orcid_id):
     disco = request.get_json()
     disco_id = str(mongo.save_disco(orcid_id, disco))
-    disco_name = disco['name']
+    disco_name = disco["name"]
     research_objects_urls = [
         node["data"]["id"] for node in disco["diagram"]["elements"]["nodes"]
     ]
@@ -138,7 +138,7 @@ def create_disco(orcid_id):
 @jwt_required
 def update_disco(orcid_id, disco_id):
     disco = request.get_json()
-    disco_name = disco['name']
+    disco_name = disco["name"]
     research_objects_urls = [
         node["data"]["id"] for node in disco["diagram"]["elements"]["nodes"]
     ]
@@ -170,7 +170,7 @@ def publish_disco(orcid_id, disco_id):
 @jwt_required
 def get_disco_status(orcid_id, disco_id):
     disco = mongo.get_disco(orcid_id, disco_id)
-    return disco["status"]
+    return disco["status"] if "status" in disco else "unpublished"
 
 
 @app.route(
