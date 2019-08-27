@@ -1,6 +1,7 @@
 from scholarly_wallet import mongo_access as mongo, config, logger
 import urllib.request
 import urllib.parse
+from urllib.error import HTTPError
 import json
 import tempfile
 import os
@@ -49,16 +50,19 @@ def download_files(figshare_ro, access_token, file_name):
     response = urllib.request.urlopen(req)
     figshare_files = json.loads(response.read())
     with tempfile.TemporaryDirectory() as tmpdirname:
-        logger.info('Created temporary directory for Figshare files: ', tmpdirname)
+        logger.info('Created temporary directory for Figshare files: ' + str(tmpdirname))
         for figshare_file in figshare_files:
-            logger.info('Trying to get: ', figshare_file)
-            req = urllib.request.Request(figshare_file['download_url'],
-                                         headers={'Authorization': 'token ' + access_token})
-            response = urllib.request.urlopen(req)
-            figshare_file_content = response.read()
-            with open(tmpdirname + '/' + figshare_file['name'], 'wb') as f:
-                f.write(figshare_file_content)
-        logger.info('Trying to compress: ', file_name)
+            logger.info('Trying to get: ' + str(figshare_file))
+            req = urllib.request.Request(figshare_file['download_url'])
+            try:
+                response = urllib.request.urlopen(req)
+                figshare_file_content = response.read()
+                with open(tmpdirname + '/' + figshare_file['name'], 'wb') as f:
+                    f.write(figshare_file_content)
+            except HTTPError as e:
+                logger.info(e.message)
+                logger.info(response)
+        logger.info('Trying to compress: ' + file_name)
         zipf = zipfile.ZipFile(file_name, 'w', zipfile.ZIP_DEFLATED)
         zip_dir(tmpdirname, zipf)
         zipf.close()
