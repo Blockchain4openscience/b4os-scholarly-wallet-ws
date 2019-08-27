@@ -55,8 +55,11 @@ def figshare_auth():
     auth_code = request.args.get("code")
     orcid_id = request.args.get("orcid")
     figshare_token = figshare.authenticate(auth_code, orcid_id)
-    articles = figshare.get_articles(figshare_token, orcid_id)
-    return jsonify(articles)
+    if figshare_token is not None:
+        articles = figshare.get_articles(figshare_token, orcid_id)
+        return jsonify(articles)
+    else
+        return jsonify({'Msg': 'Not auth for figshare'}), 403
 
 
 @app.route("/api/<string:source>/claim", methods=["POST", "OPTIONS"])
