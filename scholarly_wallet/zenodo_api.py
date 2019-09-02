@@ -78,7 +78,7 @@ def publish_to_zenodo(author, disco):
             "publication_type": "milestone",
             "description": disco["description"]
             if disco["description"]
-            else disco["title"],
+            else disco["name"],
             "creators": [{"name": author["name"], "orcid": author["orcid"]}],
             "keywords": ["disco", "scholarly wallet", "bundle"],
             "notes": notes,
